@@ -10,7 +10,7 @@ print(f"Using {device}")
 grid_size = 2  # 2×2棋盘
 x_range = (-2, 2)  # x轴范围：-2到2（中间0为分界）
 y_range = (-2, 2)  # y轴范围：-2到2（中间0为分界）
-n_per_grid = 500  # 每个格子的点数
+n_per_grid = 250  # 每个格子的点数
 
 # 生成每个格子的点（集中在格子内，增强棋盘感）
 sampled_points = []
@@ -41,6 +41,26 @@ sampled_points.append(np.hstack([x4[:, None], y4[:, None], color4]))
 # 合并为5维数据（x,y,R,G,B）
 sampled_points = np.vstack(sampled_points)
 sampled_points = torch.tensor(sampled_points, dtype=torch.float32, device=device)
+
+# ---------------------- 可视化 sampled_points 并保存图片 ----------------------
+import matplotlib.pyplot as plt
+
+with torch.no_grad():
+    sp_np = sampled_points.detach().cpu().numpy()
+    xy = sp_np[:, :2]
+    rgb = np.clip(sp_np[:, 2:5], 0.0, 1.0)
+
+plt.figure(figsize=(6, 6))
+plt.scatter(xy[:, 0], xy[:, 1], c=rgb, s=8, alpha=0.8)
+plt.axvline(x=0, color='black', linestyle='--', linewidth=1)
+plt.axhline(y=0, color='black', linestyle='--', linewidth=1)
+plt.xlim(-2.5, 2.5)
+plt.ylim(-2.5, 2.5)
+plt.grid(True, linestyle=':', linewidth=0.6)
+plt.title("Sampled Points (Checkerboard)")
+plt.tight_layout()
+plt.savefig("sampled_points.png", dpi=200, bbox_inches='tight')
+plt.close()
 
 # ---------------------- 定义象限Condition生成函数 ----------------------
 def get_cond(coord):
@@ -83,7 +103,7 @@ optim = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 # ---------------------- 训练循环 ----------------------
 data = sampled_points
-training_steps = 20000
+training_steps = 10000
 batch_size = 96
 pbar = tqdm(range(training_steps))
 
@@ -120,42 +140,45 @@ for i in pbar:
 """ 推理 """
 import matplotlib.pyplot as plt
 
-def generate_by_cond(cond_vec, num_points=256):
+def generate_by_cond(cond_vec, num_points=512, num_gen_steps=10):
     """根据指定的Condition生成点"""
     x0 = torch.randn(num_points, 5, device=device)  # 初始噪声
-    t = torch.ones(num_points, device=device) * 0.95  # 接近目标分布的时间步
+    t_start, t_end = 0.99, 0.02  # 线性时间调度：由大到小
     cond = torch.tensor([cond_vec] * num_points, dtype=torch.float32, device=device)  # 重复Condition
     
     # 多步迭代生成
     xt = x0
-    for _ in range(15):
+    model.eval()
+    for k in range(num_gen_steps):
         with torch.no_grad():
+            tk = t_start + (t_end - t_start) * (k / max(1, (num_gen_steps - 1)))
+            t = torch.full((num_points,), tk, device=device)
             pred = model(xt, t, cond)
-        xt = xt + pred * (1/15)  # 逐步更新
+        xt = xt + pred * (1/num_gen_steps)  # 逐步更新
     
-    # 转换为numpy并截断颜色值到[0,1]（关键修复）
+    # 转换为numpy并截断颜色值到[0,1]
     generated = xt.detach().cpu().numpy()
-    generated[:, 2:5] = np.clip(generated[:, 2:5], 0, 1)  # RGB通道严格限制在0-1
+    generated[:, 2:5] = np.clip(generated[:, 2:5], 0, 1)
     return generated
 
 # 生成四个象限的点并可视化
 plt.figure(figsize=(8,8))
 
 # 第一象限（Condition [1,1]）
-points1 = generate_by_cond([1,1])
-plt.scatter(points1[:,0], points1[:,1], c=points1[:,2:5], alpha=0.7, label='第一象限（红）')
+points1 = generate_by_cond([1,1], num_points=512)
+plt.scatter(points1[:,0], points1[:,1], c=points1[:,2:5], alpha=0.7)
 
 # 第二象限（Condition [0,1]）
-points2 = generate_by_cond([0,1])
-plt.scatter(points2[:,0], points2[:,1], c=points2[:,2:5], alpha=0.7, label='第二象限（黄）')
+points2 = generate_by_cond([0,1], num_points=512)
+plt.scatter(points2[:,0], points2[:,1], c=points2[:,2:5], alpha=0.7)
 
 # 第三象限（Condition [0,0]）
-points3 = generate_by_cond([0,0])
-plt.scatter(points3[:,0], points3[:,1], c=points3[:,2:5], alpha=0.7, label='第三象限（绿）')
+points3 = generate_by_cond([0,0], num_points=512)
+plt.scatter(points3[:,0], points3[:,1], c=points3[:,2:5], alpha=0.7)
 
 # 第四象限（Condition [1,0]）
-points4 = generate_by_cond([1,0])
-plt.scatter(points4[:,0], points4[:,1], c=points4[:,2:5], alpha=0.7, label='第四象限（蓝）')
+points4 = generate_by_cond([1,0], num_points=512)
+plt.scatter(points4[:,0], points4[:,1], c=points4[:,2:5], alpha=0.7)
 
 # 绘制棋盘格边界（x=0和y=0）
 plt.axvline(x=0, color='black', linestyle='--')
@@ -164,5 +187,5 @@ plt.xlim(-2.5, 2.5)
 plt.ylim(-2.5, 2.5)
 plt.grid(True)
 plt.legend()
-plt.title("2×2棋盘格生成结果（按象限分色）")
+plt.title("2×2 Checkerboard Squares with Colors (Flow Matching)")
 plt.show()
