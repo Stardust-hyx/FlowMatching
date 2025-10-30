@@ -26,7 +26,7 @@ python example.py
 ```
 
 脚本主要流程为：
-1. 生成1幅带颜色的二维棋盘数据（自动保存为`sampled_points.png`）。
+1. 生成带颜色的二维棋盘点云数据（每个点为五维向量x,y+三通道颜色）（自动保存为`sampled_points.png`）。
 2. 训练条件型Flow Matching神经网络。
 3. 训练后，分别以四种Condition在四个象限生成采样点并可视化（弹出结果窗口）。
 
